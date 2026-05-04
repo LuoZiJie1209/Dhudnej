@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1公分級座標轉換系統｜WGS84 / TWD97 / UTM51</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb;
+    --line:#334155; --accent:#38bdf8; --ok:#22c55e; --bad:#ef4444; --warn:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",Arial,sans-serif;
+    background:linear-gradient(180deg,#020617,#0f172a); color:var(--text); min-height:100vh;
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:22px}
+  h1{font-size:24px;margin:0 0 8px}
+  .sub{color:var(--muted);font-size:14px;line-height:1.6;margin-bottom:18px}
+  .grid{display:grid;grid-template-columns:1fr;gap:14px}
+  @media (min-width:800px){.grid{grid-template-columns:1fr 1fr}}
+  .card{
+    background:rgba(17,24,39,.88); border:1px solid var(--line);
+    border-radius:16px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,.25)
+  }
+  .card h2{font-size:18px;margin:0 0 12px}
+  label{display:block;color:#cbd5e1;font-size:13px;margin:10px 0 6px}
+  input, select{
+    width:100%; padding:12px; border-radius:10px; border:1px solid var(--line);
+    background:#020617; color:var(--text); font-size:16px; outline:none;
+  }
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(56,189,248,.12)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  button{
+    border:0;border-radius:12px;padding:12px 14px;font-weight:700;font-size:15px;
+    color:#00111f;background:var(--accent);cursor:pointer;margin-top:14px;width:100%;
+  }
+  button.secondary{background:#334155;color:var(--text)}
+  .results{display:grid;gap:10px}
+  .out{
+    border:1px solid var(--line);border-radius:12px;padding:12px;background:#020617;
+  }
+  .out b{display:block;margin-bottom:6px;color:#f8fafc}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;line-height:1.55}
+  .status{margin-top:10px;padding:12px;border-radius:12px;font-weight:700}
+  .ok{background:rgba(34,197,94,.13);border:1px solid rgba(34,197,94,.45);color:#86efac}
+  .bad{background:rgba(239,68,68,.13);border:1px solid rgba(239,68,68,.45);color:#fca5a5}
+  .warn{background:rgba(245,158,11,.13);border:1px solid rgba(245,158,11,.45);color:#fcd34d}
+  .note{font-size:13px;color:var(--muted);line-height:1.6;margin-top:10px}
+  .pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;color:#cbd5e1;font-size:12px;margin:2px 4px 2px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>1公分級座標轉換系統</h1>
+  <div class="sub">
+    支援 <span class="pill">WGS84 經緯度 EPSG:4326</span>
+    <span class="pill">TWD97 / TM2 zone 121 EPSG:3826</span>
+    <span class="pill">WGS84 / UTM Zone 51N EPSG:32651</span><br>
+    內部使用完整 double 精度計算，畫面顯示小數點後 4 位，並自動反算驗證誤差是否 ≤ 0.0100 m。
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>輸入座標</h2>
+      <label>輸入類型</label>
+      <select id="type" onchange="switchType()">
+        <option value="twd97">TWD97 / TM2 zone 121：E, N</option>
+        <option value="utm51">WGS84 / UTM Zone 51N：E, N</option>
+        <option value="wgs84">WGS84 經緯度：經度, 緯度</option>
+      </select>
+
+      <div id="projectedInputs">
+        <div class="row">
+          <div>
+            <label id="xLabel">E 東向座標</label>
+            <input id="x" inputmode="decimal" placeholder="例如 212700">
+          </div>
+          <div>
+            <label id="yLabel">N 北向座標</label>
+            <input id="y" inputmode="decimal" placeholder="例如 2674290">
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <button onclick="convert()">轉換 + 反算驗證</button>
+        <button class="secondary" onclick="fillSample()">填入測試範例</button>
+      </div>
+
+      <div class="note">
+        注意：本工具可控制「座標轉換計算誤差」在 1 公分內；原始測點本身精度仍取決於測量成果。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>轉換結果</h2>
+      <div class="results">
+        <div class="out"><b>TWD97 / TM2 zone 121</b><div id="outTwd" class="mono">尚未轉換</div></div>
+        <div class="out"><b>WGS84 經緯度</b><div id="outWgs" class="mono">尚未轉換</div></div>
+        <div class="out"><b>WGS84 / UTM Zone 51N</b><div id="outUtm" class="mono">尚未轉換</div></div>
+      </div>
+      <div id="status" class="status warn">等待輸入</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>固定參數</h2>
+    <div class="mono">TWD97 / TM2 zone 121：
+中央經線 = 121°
+k0 = 0.9999
+False Easting = 250000 m
+False Northing = 0 m
+橢球 = GRS80
+
+UTM Zone 51N：
+中央經線 = 123°
+k0 = 0.9996
+False Easting = 500000 m
+False Northing = 0 m
+橢球 = WGS84</div>
+  </div>
+</div>
+
+<script>
+const ELLIPSOIDS = {
+  GRS80: { a: 6378137.0, invf: 298.257222101 },
+  WGS84: { a: 6378137.0, invf: 298.257223563 }
+};
+
+function ellipsoid(name){
+  const e = ELLIPSOIDS[name];
+  const f = 1 / e.invf;
+  const e2 = f * (2 - f);
+  const ep2 = e2 / (1 - e2);
+  return { a:e.a, f, e2, ep2 };
+}
+
+function degToRad(d){ return d * Math.PI / 180; }
+function radToDeg(r){ return r * 180 / Math.PI; }
+function fmt(v, n=4){ return Number(v).toFixed(n); }
+function fmtDeg(v){ return Number(v).toFixed(8); }
+
+function latLonToTM(latDeg, lonDeg, lon0Deg, k0, fe, fn, ellName){
+  const {a, e2, ep2} = ellipsoid(ellName);
+  const lat = degToRad(latDeg), lon = degToRad(lonDeg), lon0 = degToRad(lon0Deg);
+  const sinp = Math.sin(lat), cosp = Math.cos(lat), tanp = Math.tan(lat);
+  const N = a / Math.sqrt(1 - e2 * sinp * sinp);
+  const T = tanp * tanp;
+  const C = ep2 * cosp * cosp;
+  const A = cosp * (lon - lon0);
+  const e4 = e2 * e2, e6 = e4 * e2;
+
+  const M = a * (
+    (1 - e2/4 - 3*e4/64 - 5*e6/256) * lat
+    - (3*e2/8 + 3*e4/32 + 45*e6/1024) * Math.sin(2*lat)
+    + (15*e4/256 + 45*e6/1024) * Math.sin(4*lat)
+    - (35*e6/3072) * Math.sin(6*lat)
+  );
+
+  const E = fe + k0 * N * (
+    A + (1 - T + C) * Math.pow(A,3) / 6
+    + (5 - 18*T + T*T + 72*C - 58*ep2) * Math.pow(A,5) / 120
+  );
+
+  const North = fn + k0 * (
+    M + N * tanp * (
+      A*A/2
+      + (5 - T + 9*C + 4*C*C) * Math.pow(A,4) / 24
+      + (61 - 58*T + T*T + 600*C - 330*ep2) * Math.pow(A,6) / 720
+    )
+  );
+
+  return {E, N: North};
+}
+
+function tmToLatLon(E, North, lon0Deg, k0, fe, fn, ellName){
+  const {a, e2, ep2} = ellipsoid(ellName);
+  const x = E - fe;
+  const y = North - fn;
+  const M = y / k0;
+  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+  const mu = M / (a * (1 - e2/4 - 3*e2*e2/64 - 5*Math.pow(e2,3)/256));
+
+  const J1 = 3*e1/2 - 27*Math.pow(e1,3)/32;
+  const J2 = 21*e1*e1/16 - 55*Math.pow(e1,4)/32;
+  const J3 = 151*Math.pow(e1,3)/96;
+  const J4 = 1097*Math.pow(e1,4)/512;
+
+  const fp = mu + J1*Math.sin(2*mu) + J2*Math.sin(4*mu) + J3*Math.sin(6*mu) + J4*Math.sin(8*mu);
+
+  const sinfp = Math.sin(fp), cosfp = Math.cos(fp), tanfp = Math.tan(fp);
+  const C1 = ep2 * cosfp * cosfp;
+  const T1 = tanfp * tanfp;
+  const R1 = a * (1 - e2) / Math.pow(1 - e2 * sinfp * sinfp, 1.5);
+  const N1 = a / Math.sqrt(1 - e2 * sinfp * sinfp);
+  const D = x / (N1 * k0);
+
+  const lat = fp - (N1 * tanfp / R1) * (
+    D*D/2
+    - (5 + 3*T1 + 10*C1 - 4*C1*C1 - 9*ep2) * Math.pow(D,4) / 24
+    + (61 + 90*T1 + 298*C1 + 45*T1*T1 - 252*ep2 - 3*C1*C1) * Math.pow(D,6) / 720
+  );
+
+  const lon = degToRad(lon0Deg) + (
+    D
+    - (1 + 2*T1 + C1) * Math.pow(D,3) / 6
+    + (5 - 2*C1 + 28*T1 - 3*C1*C1 + 8*ep2 + 24*T1*T1) * Math.pow(D,5) / 120
+  ) / cosfp;
+
+  return {lat: radToDeg(lat), lon: radToDeg(lon)};
+}
+
+function distance2D(a,b){
+  const dx = a.E - b.E, dy = a.N - b.N;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+
+function wgsDistanceMeters(p1, p2){
+  const R = 6371008.8;
+  const lat1 = degToRad(p1.lat), lat2 = degToRad(p2.lat);
+  const dLat = lat2 - lat1;
+  const dLon = degToRad(p2.lon - p1.lon);
+  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function switchType(){
+  const t = document.getElementById("type").value;
+  document.getElementById("x").value = "";
+  document.getElementById("y").value = "";
+  if(t === "wgs84"){
+    document.getElementById("xLabel").textContent = "經度 Longitude";
+    document.getElementById("yLabel").textContent = "緯度 Latitude";
+    document.getElementById("x").placeholder = "例如 120.63289271";
+    document.getElementById("y").placeholder = "例如 24.17352794";
+  }else{
+    document.getElementById("xLabel").textContent = "E 東向座標";
+    document.getElementById("yLabel").textContent = "N 北向座標";
+    document.getElementById("x").placeholder = t === "twd97" ? "例如 212700" : "例如 259517.1278";
+    document.getElementById("y").placeholder = t === "twd97" ? "例如 2674290" : "例如 2675473.7479";
+  }
+}
+
+function fillSample(){
+  const t = document.getElementById("type").value;
+  if(t === "twd97"){
+    document.getElementById("x").value = "212700";
+    document.getElementById("y").value = "2674290";
+  } else if(t === "utm51"){
+    document.getElementById("x").value = "259517.1278";
+    document.getElementById("y").value = "2675473.7479";
+  } else {
+    document.getElementById("x").value = "120.63289271";
+    document.getElementById("y").value = "24.17352794";
+  }
+  convert();
+}
+
+function convert(){
+  const t = document.getElementById("type").value;
+  const x = parseFloat(document.getElementById("x").value.replace(",", ""));
+  const y = parseFloat(document.getElementById("y").value.replace(",", ""));
+  const status = document.getElementById("status");
+
+  if(!Number.isFinite(x) || !Number.isFinite(y)){
+    status.className = "status bad";
+    status.textContent = "輸入錯誤：請輸入有效數字";
+    return;
+  }
+
+  let wgs, twd, utm, err = 999;
+
+  if(t === "twd97"){
+    twd = {E:x, N:y};
+    wgs = tmToLatLon(twd.E, twd.N, 121, 0.9999, 250000, 0, "GRS80");
+    utm = latLonToTM(wgs.lat, wgs.lon, 123, 0.9996, 500000, 0, "WGS84");
+    const wgsBack = tmToLatLon(utm.E, utm.N, 123, 0.9996, 500000, 0, "WGS84");
+    const twdBack = latLonToTM(wgsBack.lat, wgsBack.lon, 121, 0.9999, 250000, 0, "GRS80");
+    err = distance2D(twd, twdBack);
+  }
+
+  if(t === "utm51"){
+    utm = {E:x, N:y};
+    wgs = tmToLatLon(utm.E, utm.N, 123, 0.9996, 500000, 0, "WGS84");
+    twd = latLonToTM(wgs.lat, wgs.lon, 121, 0.9999, 250000, 0, "GRS80");
+    const wgsBack = tmToLatLon(twd.E, twd.N, 121, 0.9999, 250000, 0, "GRS80");
+    const utmBack = latLonToTM(wgsBack.lat, wgsBack.lon, 123, 0.9996, 500000, 0, "WGS84");
+    err = distance2D(utm, utmBack);
+  }
+
+  if(t === "wgs84"){
+    wgs = {lon:x, lat:y};
+    twd = latLonToTM(wgs.lat, wgs.lon, 121, 0.9999, 250000, 0, "GRS80");
+    utm = latLonToTM(wgs.lat, wgs.lon, 123, 0.9996, 500000, 0, "WGS84");
+    const wgsBack = tmToLatLon(twd.E, twd.N, 121, 0.9999, 250000, 0, "GRS80");
+    err = wgsDistanceMeters(wgs, wgsBack);
+  }
+
+  document.getElementById("outTwd").textContent =
+    `E = ${fmt(twd.E)}\nN = ${fmt(twd.N)}`;
+
+  document.getElementById("outWgs").textContent =
+    `經度 Lon = ${fmtDeg(wgs.lon)}\n緯度 Lat = ${fmtDeg(wgs.lat)}`;
+
+  document.getElementById("outUtm").textContent =
+    `E = ${fmt(utm.E)}\nN = ${fmt(utm.N)}`;
+
+  if(err <= 0.01){
+    status.className = "status ok";
+    status.textContent = `反算驗證合格：誤差 ${err.toFixed(6)} m ≤ 0.0100 m`;
+  }else{
+    status.className = "status bad";
+    status.textContent = `反算驗證失敗：誤差 ${err.toFixed(6)} m > 0.0100 m，請檢查座標系或輸入順序`;
+  }
+}
+
+switchType();
+</script>
+</body>
+</html>
